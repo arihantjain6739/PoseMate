@@ -1,9 +1,7 @@
 import streamlit as st
-
 from PIL import Image
 import numpy as np
 import cv2
-
 
 DEMO_IMAGE = 'stand.jpg'
 
@@ -26,46 +24,44 @@ inHeight = height
 
 net = cv2.dnn.readNetFromTensorflow("graph_opt.pb")
 
-
-
-
 st.title("Human Pose Estimation OpenCV")
-
 st.text('Make Sure you have a clear image with all the parts clearly visible')
 
-img_file_buffer = st.file_uploader("Upload an image, Make sure you have a clear image", type=[ "jpg", "jpeg",'png'])
+img_file_buffer = st.file_uploader("Upload an image, Make sure you have a clear image", type=["jpg", "jpeg", "png"])
 
 if img_file_buffer is not None:
-    image = np.array(Image.open(img_file_buffer))
-
+    pil_image = Image.open(img_file_buffer)
 else:
-    demo_image = DEMO_IMAGE
-    image = np.array(Image.open(demo_image))
-    
+    pil_image = Image.open(DEMO_IMAGE)
+
+# Convert to numpy array
+image = np.array(pil_image)
+
+# Fix: Ensure it's 3 channels
+if image.shape[-1] == 4:  # Has alpha channel
+    image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+
 st.subheader('Original Image')
-st.image(
-    image, caption=f"Original Image", use_column_width=True
-) 
+st.image(image, caption="Original Image", use_column_width=True)
 
-thres = st.slider('Threshold for detecting the key points',min_value = 0,value = 20, max_value = 100,step = 5)
+thres = st.slider('Threshold for detecting the key points', min_value=0, value=20, max_value=100, step=5)
+thres = thres / 100
 
-thres = thres/100
-
-@st.cache
+@st.cache_data  # Updated cache function for newer versions of Streamlit
 def poseDetector(frame):
     frameWidth = frame.shape[1]
     frameHeight = frame.shape[0]
     
+    # Preprocess image
     net.setInput(cv2.dnn.blobFromImage(frame, 1.0, (inWidth, inHeight), (127.5, 127.5, 127.5), swapRB=True, crop=False))
     
     out = net.forward()
-    out = out[:, :19, :, :]
+    out = out[:, :19, :, :]  # Get first 19 parts
     
     assert(len(BODY_PARTS) == out.shape[1])
     
     points = []
     for i in range(len(BODY_PARTS)):
-        # Slice heatmap of corresponging body's part.
         heatMap = out[0, i, :, :]
 
         _, conf, _, point = cv2.minMaxLoc(heatMap)
@@ -73,36 +69,23 @@ def poseDetector(frame):
         y = (frameHeight * point[1]) / out.shape[2]
         points.append((int(x), int(y)) if conf > thres else None)
         
-        
+    # Draw skeleton
     for pair in POSE_PAIRS:
         partFrom = pair[0]
         partTo = pair[1]
-        assert(partFrom in BODY_PARTS)
-        assert(partTo in BODY_PARTS)
 
         idFrom = BODY_PARTS[partFrom]
         idTo = BODY_PARTS[partTo]
 
         if points[idFrom] and points[idTo]:
             cv2.line(frame, points[idFrom], points[idTo], (0, 255, 0), 3)
-            cv2.ellipse(frame, points[idFrom], (3, 3), 0, 0, 360, (0, 0, 255), cv2.FILLED)
-            cv2.ellipse(frame, points[idTo], (3, 3), 0, 0, 360, (0, 0, 255), cv2.FILLED)
+            cv2.circle(frame, points[idFrom], 4, (0, 0, 255), cv2.FILLED)
+            cv2.circle(frame, points[idTo], 4, (0, 0, 255), cv2.FILLED)
             
-            
-    t, _ = net.getPerfProfile()
-    
     return frame
 
-
+# Call pose detector
 output = poseDetector(image)
 
-
 st.subheader('Positions Estimated')
-st.image(
-       output, caption=f"Positions Estimated", use_column_width=True)
-    
-st.markdown('''
-            # 
-             
-            ''')
-
+st.image(output, caption="Positions Estimated", use_column_width=True)
